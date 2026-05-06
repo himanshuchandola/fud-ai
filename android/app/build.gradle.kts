@@ -68,12 +68,6 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
-        create("playtest") {
-            initWith(getByName("release"))
-            applicationIdSuffix = ".playtest"
-            versionNameSuffix = "-playtest"
-            matchingFallbacks += listOf("release")
-        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
