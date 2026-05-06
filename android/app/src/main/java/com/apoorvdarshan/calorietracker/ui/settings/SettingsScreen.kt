@@ -1,6 +1,8 @@
 package com.apoorvdarshan.calorietracker.ui.settings
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -103,6 +105,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -123,6 +126,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.apoorvdarshan.calorietracker.AppContainer
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.ActivityLevel
 import com.apoorvdarshan.calorietracker.models.AIProvider
 import com.apoorvdarshan.calorietracker.models.AutoBalanceMacro
@@ -131,6 +135,8 @@ import com.apoorvdarshan.calorietracker.models.SpeechLanguage
 import com.apoorvdarshan.calorietracker.models.SpeechProvider
 import com.apoorvdarshan.calorietracker.models.UserProfile
 import com.apoorvdarshan.calorietracker.models.WeightGoal
+import com.apoorvdarshan.calorietracker.services.ai.PlusUsageItem
+import com.apoorvdarshan.calorietracker.services.billing.FudAIPlusPlan
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -147,7 +153,7 @@ import kotlinx.coroutines.runBlocking
 import java.util.Locale
 
 private enum class SettingsSheet {
-    AI_PROVIDER, AI_MODEL, API_KEY, CUSTOM_BASE_URL, SPEECH_PROVIDER, SPEECH_LANGUAGE, SPEECH_KEY,
+    AI_ACCESS_MODE, AI_PROVIDER, AI_MODEL, API_KEY, CUSTOM_BASE_URL, SPEECH_PROVIDER, SPEECH_LANGUAGE, SPEECH_KEY,
     FALLBACK_PROVIDER, FALLBACK_MODEL, FALLBACK_KEY, FALLBACK_BASE_URL,
     GENDER, BIRTHDAY, HEIGHT, WEIGHT, BODY_FAT, GOAL_BODY_FAT, ACTIVITY, GOAL, GOAL_WEIGHT, GOAL_SPEED,
     CALORIES, PROTEIN, CARBS, FAT,
@@ -169,6 +175,12 @@ fun SettingsScreen(container: AppContainer, nav: NavHostController) {
     var showMaxPinnedAlert by remember { mutableStateOf(false) }
     var permissionDeniedMessage by remember { mutableStateOf<String?>(null) }
     val activityContext = LocalContext.current
+
+    LaunchedEffect(ui.aiAccessMode, ui.plusActive) {
+        if (ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS && ui.plusActive) {
+            vm.refreshPlusUsage()
+        }
+    }
 
     // Notifications: API 33+ requires runtime POST_NOTIFICATIONS. We only flip the
     // pref to true if the user actually grants. Denial leaves the toggle off so
@@ -434,22 +446,112 @@ fun SettingsScreen(container: AppContainer, nav: NavHostController) {
                 }
             }
 
-            // Section 4 — AI Provider (matches iOS Section "AI Provider")
-            SectionCard(title = stringResource(R.string.settings_section_ai)) {
-                SettingRow(stringResource(R.string.settings_ai_provider), stringResource(ui.selectedAI.displayNameRes), icon = Icons.Outlined.SmartToy) { sheet = SettingsSheet.AI_PROVIDER }
+            // Section 4 — AI Access (BYOK stays default; Plus hides provider/key setup)
+            SectionCard(title = "AI Access") {
+                SettingRow(
+                    "Mode",
+                    if (ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS) "Fud AI Plus" else "Bring Your Own Key",
+                    icon = if (ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS) Icons.Outlined.SmartToy else Icons.Outlined.Key
+                ) { sheet = SettingsSheet.AI_ACCESS_MODE }
                 HorizontalDivider()
-                SettingRow(stringResource(R.string.settings_ai_model), ui.selectedModel.ifEmpty { stringResource(R.string.settings_ai_model_unset) }, icon = Icons.Outlined.Tune) { sheet = SettingsSheet.AI_MODEL }
-                if (ui.selectedAI.requiresApiKey) {
+                if (ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS) {
+                    InfoRow(
+                        "Status",
+                        if (ui.plusActive) "Active" else "Subscription needed",
+                        icon = Icons.Filled.Check,
+                        tint = if (ui.plusActive) AppColors.Protein else AppColors.Calorie
+                    )
+                    if (ui.plusActive) {
+                        ui.plusUsage?.let { usage ->
+                            HorizontalDivider()
+                            UsageRow("Food Analysis", usage.food, Icons.Outlined.LocalDining)
+                            HorizontalDivider()
+                            UsageRow("Speech-to-Text", usage.speech, Icons.Outlined.Mic)
+                            HorizontalDivider()
+                            UsageRow("Coach", usage.coach, Icons.Outlined.SmartToy)
+                            HorizontalDivider()
+                            UsageRow("Daily Safety Limit", usage.global, Icons.Outlined.BatteryAlert)
+                        }
+                        ui.plusUsageError?.let {
+                            HorizontalDivider()
+                            Text(
+                                it,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                    if (!ui.plusActive) {
+                        HorizontalDivider()
+                        PlusPlanActions(
+                            plans = ui.plusPlans,
+                            onPurchase = { plan ->
+                                (activityContext as? Activity)?.let { vm.purchasePlus(it, plan.productId) }
+                            }
+                        )
+                    }
                     HorizontalDivider()
-                    SettingRow(stringResource(R.string.settings_api_key), ui.apiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) }, icon = Icons.Outlined.Key) { sheet = SettingsSheet.API_KEY }
-                }
-                if (ui.selectedAI.requiresCustomEndpoint || ui.selectedAI == AIProvider.OLLAMA) {
+                    SettingRow("Restore Purchases", "Google Play", icon = Icons.Outlined.Refresh) {
+                        vm.restorePlus()
+                    }
                     HorizontalDivider()
                     SettingRow(
-                        if (ui.selectedAI.requiresCustomEndpoint) stringResource(R.string.settings_base_url) else stringResource(R.string.settings_server_url),
-                        stringResource(R.string.settings_tap_to_edit),
+                        if (ui.plusActive) "Cancel or Manage Subscription" else "Manage Subscription",
+                        "Play Store",
                         icon = Icons.Outlined.Link
-                    ) { sheet = SettingsSheet.CUSTOM_BASE_URL }
+                    ) {
+                        openPlaySubscriptions(activityContext)
+                    }
+                    HorizontalDivider()
+                    SettingRow("Switch to BYOK", "Use your own keys", icon = Icons.Outlined.Key) {
+                        vm.setAiAccessMode(AIAccessMode.BRING_YOUR_OWN_KEY)
+                    }
+                    ui.plusBillingError?.let {
+                        Text(
+                            it,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+                    Text(
+                        "Provider, model, fallback, and speech API key settings are managed by Plus.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                } else {
+                    SettingRow("Upgrade to Fud AI Plus", "No API setup", icon = Icons.Outlined.SmartToy) {
+                        vm.setAiAccessMode(AIAccessMode.FUD_AI_PLUS)
+                    }
+                    Text(
+                        "BYOK is the free route if you can create your own Gemini/API key. Plus is optional no-setup access and supports development.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+
+            if (ui.aiAccessMode == AIAccessMode.BRING_YOUR_OWN_KEY) {
+                // Section 4a — AI Provider (matches iOS Section "AI Provider")
+                SectionCard(title = stringResource(R.string.settings_section_ai)) {
+                    SettingRow(stringResource(R.string.settings_ai_provider), stringResource(ui.selectedAI.displayNameRes), icon = Icons.Outlined.SmartToy) { sheet = SettingsSheet.AI_PROVIDER }
+                    HorizontalDivider()
+                    SettingRow(stringResource(R.string.settings_ai_model), ui.selectedModel.ifEmpty { stringResource(R.string.settings_ai_model_unset) }, icon = Icons.Outlined.Tune) { sheet = SettingsSheet.AI_MODEL }
+                    if (ui.selectedAI.requiresApiKey) {
+                        HorizontalDivider()
+                        SettingRow(stringResource(R.string.settings_api_key), ui.apiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) }, icon = Icons.Outlined.Key) { sheet = SettingsSheet.API_KEY }
+                    }
+                    if (ui.selectedAI.requiresCustomEndpoint || ui.selectedAI == AIProvider.OLLAMA) {
+                        HorizontalDivider()
+                        SettingRow(
+                            if (ui.selectedAI.requiresCustomEndpoint) stringResource(R.string.settings_base_url) else stringResource(R.string.settings_server_url),
+                            stringResource(R.string.settings_tap_to_edit),
+                            icon = Icons.Outlined.Link
+                        ) { sheet = SettingsSheet.CUSTOM_BASE_URL }
+                    }
                 }
             }
 
@@ -468,75 +570,77 @@ fun SettingsScreen(container: AppContainer, nav: NavHostController) {
                 )
             }
 
-            // Section 4c — Fallback Provider (matches iOS Section)
-            SectionCard(title = stringResource(R.string.settings_section_fallback)) {
-                ToggleRow(
-                    stringResource(R.string.settings_enable_fallback),
-                    ui.fallbackEnabled,
-                    icon = Icons.Outlined.Refresh,
-                    onChange = { vm.setFallbackEnabled(it) }
-                )
-                if (ui.fallbackEnabled) {
-                    HorizontalDivider()
-                    SettingRow(
-                        stringResource(R.string.settings_ai_provider),
-                        stringResource(ui.fallbackProvider.displayNameRes),
-                        icon = Icons.Outlined.SmartToy
-                    ) { sheet = SettingsSheet.FALLBACK_PROVIDER }
-                    HorizontalDivider()
-                    SettingRow(
-                        stringResource(R.string.settings_ai_model),
-                        ui.fallbackModel.ifEmpty { stringResource(R.string.settings_ai_model_unset) },
-                        icon = Icons.Outlined.Tune
-                    ) { sheet = SettingsSheet.FALLBACK_MODEL }
-                    if (ui.fallbackProvider.requiresApiKey) {
+            if (ui.aiAccessMode == AIAccessMode.BRING_YOUR_OWN_KEY) {
+                // Section 4c — Fallback Provider (matches iOS Section)
+                SectionCard(title = stringResource(R.string.settings_section_fallback)) {
+                    ToggleRow(
+                        stringResource(R.string.settings_enable_fallback),
+                        ui.fallbackEnabled,
+                        icon = Icons.Outlined.Refresh,
+                        onChange = { vm.setFallbackEnabled(it) }
+                    )
+                    if (ui.fallbackEnabled) {
                         HorizontalDivider()
                         SettingRow(
-                            stringResource(R.string.settings_api_key),
-                            ui.fallbackApiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) },
-                            icon = Icons.Outlined.Key
-                        ) { sheet = SettingsSheet.FALLBACK_KEY }
-                    }
-                    if (ui.fallbackProvider.requiresCustomEndpoint || ui.fallbackProvider == AIProvider.OLLAMA) {
+                            stringResource(R.string.settings_ai_provider),
+                            stringResource(ui.fallbackProvider.displayNameRes),
+                            icon = Icons.Outlined.SmartToy
+                        ) { sheet = SettingsSheet.FALLBACK_PROVIDER }
                         HorizontalDivider()
                         SettingRow(
-                            if (ui.fallbackProvider.requiresCustomEndpoint) stringResource(R.string.settings_base_url) else stringResource(R.string.settings_server_url),
-                            stringResource(R.string.settings_tap_to_edit),
-                            icon = Icons.Outlined.Link
-                        ) { sheet = SettingsSheet.FALLBACK_BASE_URL }
+                            stringResource(R.string.settings_ai_model),
+                            ui.fallbackModel.ifEmpty { stringResource(R.string.settings_ai_model_unset) },
+                            icon = Icons.Outlined.Tune
+                        ) { sheet = SettingsSheet.FALLBACK_MODEL }
+                        if (ui.fallbackProvider.requiresApiKey) {
+                            HorizontalDivider()
+                            SettingRow(
+                                stringResource(R.string.settings_api_key),
+                                ui.fallbackApiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) },
+                                icon = Icons.Outlined.Key
+                            ) { sheet = SettingsSheet.FALLBACK_KEY }
+                        }
+                        if (ui.fallbackProvider.requiresCustomEndpoint || ui.fallbackProvider == AIProvider.OLLAMA) {
+                            HorizontalDivider()
+                            SettingRow(
+                                if (ui.fallbackProvider.requiresCustomEndpoint) stringResource(R.string.settings_base_url) else stringResource(R.string.settings_server_url),
+                                stringResource(R.string.settings_tap_to_edit),
+                                icon = Icons.Outlined.Link
+                            ) { sheet = SettingsSheet.FALLBACK_BASE_URL }
+                        }
+                        Text(
+                            stringResource(R.string.settings_fallback_footer),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
                     }
+                }
+
+                // Section 5 — Speech-to-Text (matches iOS Section "Speech-to-Text")
+                SectionCard(title = stringResource(R.string.settings_section_speech)) {
+                    SettingRow(stringResource(R.string.settings_ai_provider), stringResource(ui.selectedSpeech.displayNameRes), icon = Icons.Outlined.Mic) { sheet = SettingsSheet.SPEECH_PROVIDER }
+                    HorizontalDivider()
+                    SettingRow(
+                        stringResource(R.string.settings_speech_language),
+                        stringResource(ui.selectedSpeechLanguage.displayNameRes),
+                        icon = Icons.Outlined.Language
+                    ) { sheet = SettingsSheet.SPEECH_LANGUAGE }
+                    HorizontalDivider()
                     Text(
-                        stringResource(R.string.settings_fallback_footer),
+                        stringResource(ui.selectedSpeech.descriptionRes),
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                     )
-                }
-            }
-
-            // Section 5 — Speech-to-Text (matches iOS Section "Speech-to-Text")
-            SectionCard(title = stringResource(R.string.settings_section_speech)) {
-                SettingRow(stringResource(R.string.settings_ai_provider), stringResource(ui.selectedSpeech.displayNameRes), icon = Icons.Outlined.Mic) { sheet = SettingsSheet.SPEECH_PROVIDER }
-                HorizontalDivider()
-                SettingRow(
-                    stringResource(R.string.settings_speech_language),
-                    stringResource(ui.selectedSpeechLanguage.displayNameRes),
-                    icon = Icons.Outlined.Language
-                ) { sheet = SettingsSheet.SPEECH_LANGUAGE }
-                HorizontalDivider()
-                Text(
-                    stringResource(ui.selectedSpeech.descriptionRes),
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
-                if (ui.selectedSpeech.requiresApiKey) {
-                    HorizontalDivider()
-                    SettingRow(
-                        stringResource(R.string.settings_api_key),
-                        ui.speechApiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) },
-                        icon = Icons.Outlined.Key
-                    ) { sheet = SettingsSheet.SPEECH_KEY }
+                    if (ui.selectedSpeech.requiresApiKey) {
+                        HorizontalDivider()
+                        SettingRow(
+                            stringResource(R.string.settings_api_key),
+                            ui.speechApiKeyMasked.ifEmpty { stringResource(R.string.settings_not_set) },
+                            icon = Icons.Outlined.Key
+                        ) { sheet = SettingsSheet.SPEECH_KEY }
+                    }
                 }
             }
 
@@ -670,6 +774,24 @@ private fun SettingsSheets(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state, shape = RoundedCornerShape(28.dp)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
             when (sheet) {
+                SettingsSheet.AI_ACCESS_MODE -> ListSheet(
+                    title = "AI Access",
+                    items = AIAccessMode.values().toList(),
+                    label = { if (it == AIAccessMode.FUD_AI_PLUS) "Fud AI Plus" else "Bring Your Own Key" },
+                    selected = { it == ui.aiAccessMode },
+                    onSelect = { mode ->
+                        vm.setAiAccessMode(mode)
+                        onDismiss()
+                    },
+                    icon = { if (it == AIAccessMode.FUD_AI_PLUS) Icons.Outlined.SmartToy else Icons.Outlined.Key },
+                    subtitle = {
+                        if (it == AIAccessMode.FUD_AI_PLUS)
+                            "No API setup; Gemini food scans, voice, and Coach through Plus."
+                        else
+                            "Free app mode using your own provider keys."
+                    },
+                    footer = "Switching to BYOK does not cancel an active Google Play subscription; manage it from Play Store."
+                )
                 SettingsSheet.AI_PROVIDER -> ListSheet(
                     title = stringResource(R.string.sheet_ai_provider),
                     items = AIProvider.values().toList(),
@@ -1499,6 +1621,64 @@ private fun SettingRow(
     }
 }
 
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String,
+    icon: ImageVector? = null,
+    tint: Color = AppColors.Calorie
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
+        }
+        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+    }
+}
+
+@Composable
+private fun UsageRow(label: String, bucket: PlusUsageItem, icon: ImageVector) {
+    InfoRow(
+        label = label,
+        value = "${bucket.remaining}/${bucket.limit} left",
+        icon = icon
+    )
+}
+
+@Composable
+private fun PlusPlanActions(
+    plans: List<FudAIPlusPlan>,
+    onPurchase: (FudAIPlusPlan) -> Unit
+) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (plans.isEmpty()) {
+            Text(
+                "Plans load from Google Play. Use Restore if you already subscribed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
+            )
+            return@Column
+        }
+        plans.forEach { plan ->
+            Button(
+                onClick = { onPurchase(plan) },
+                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Calorie),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("${plan.title} ${plan.price} ${plan.billingPeriod}", color = Color.White)
+            }
+        }
+    }
+}
+
 /**
  * Verbatim port of iOS `macroRow(label:icon:macro:value:sheet:)` in
  * ContentView.swift's ProfileView. Uses the DataUsage circle icon (matches
@@ -1625,6 +1805,13 @@ private fun feetInchesLabel(cm: Int): String {
     val feet = totalInches / 12
     val inches = totalInches % 12
     return "$feet' $inches\""
+}
+
+private fun openPlaySubscriptions(context: Context) {
+    val uri = Uri.parse("https://play.google.com/store/account/subscriptions?package=com.apoorvdarshan.calorietracker")
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 }
 
 private val birthdayFormatter: DateTimeFormatter =

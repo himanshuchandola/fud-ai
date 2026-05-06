@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Chair
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.LocalFireDepartment
 import androidx.compose.material.icons.outlined.Man
 import androidx.compose.material.icons.outlined.MonitorWeight
@@ -92,9 +93,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.apoorvdarshan.calorietracker.AppContainer
 import com.apoorvdarshan.calorietracker.R
 import com.apoorvdarshan.calorietracker.models.ActivityLevel
-import com.apoorvdarshan.calorietracker.models.AIProvider
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.Gender
 import com.apoorvdarshan.calorietracker.models.WeightGoal
+import com.apoorvdarshan.calorietracker.services.billing.FudAIPlusPlan
 import com.apoorvdarshan.calorietracker.services.update.AndroidUpdateChecker
 import com.apoorvdarshan.calorietracker.ui.components.DateWheelPicker
 import com.apoorvdarshan.calorietracker.ui.components.DecimalWheelPicker
@@ -111,6 +113,17 @@ import java.util.Locale
 fun OnboardingScreen(container: AppContainer, onComplete: () -> Unit) {
     val vm: OnboardingViewModel = viewModel(factory = OnboardingViewModel.Factory(container))
     val ui by vm.ui.collectAsState()
+    val plusBilling by container.plusBilling.state.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(plusBilling.isSubscribed, ui.step, ui.aiAccessMode) {
+        if (ui.step == OnboardingStep.PROVIDER &&
+            ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS &&
+            plusBilling.isSubscribed
+        ) {
+            vm.next()
+        }
+    }
 
     Column(
         Modifier
@@ -205,10 +218,15 @@ fun OnboardingScreen(container: AppContainer, onComplete: () -> Unit) {
                     onToggle = vm::setHealthConnectEnabled
                 )
                 OnboardingStep.PROVIDER -> ProviderStep(
-                    provider = ui.aiProvider,
-                    apiKey = ui.apiKey,
-                    onProviderChange = vm::setAiProvider,
-                    onKeyChange = vm::setApiKey
+                    accessMode = ui.aiAccessMode,
+                    plusActive = plusBilling.isSubscribed,
+                    plusPlans = plusBilling.plans,
+                    billingError = plusBilling.error,
+                    onAccessModeChange = vm::setAiAccessMode,
+                    onPurchasePlus = { plan ->
+                        vm.setAiAccessMode(AIAccessMode.FUD_AI_PLUS)
+                        (context as? android.app.Activity)?.let { container.plusBilling.purchase(it, plan.productId) }
+                    }
                 )
                 OnboardingStep.BUILDING_PLAN -> BuildingPlanStep(onComplete = vm::next)
                 OnboardingStep.PLAN_READY -> PlanReadyStep(state = ui, vm = vm)
@@ -342,7 +360,18 @@ fun OnboardingScreen(container: AppContainer, onComplete: () -> Unit) {
             else -> {
                 // iOS continueButton: full-width inverse-coloured capsule.
                 Button(
-                    onClick = { vm.next() },
+                    onClick = {
+                        if (ui.step == OnboardingStep.PROVIDER &&
+                            ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS &&
+                            !plusBilling.isSubscribed
+                        ) {
+                            plusBilling.plans.firstOrNull()?.let { plan ->
+                                (context as? android.app.Activity)?.let { container.plusBilling.purchase(it, plan.productId) }
+                            }
+                        } else {
+                            vm.next()
+                        }
+                    },
                     shape = RoundedCornerShape(28.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.onBackground,
@@ -355,7 +384,10 @@ fun OnboardingScreen(container: AppContainer, onComplete: () -> Unit) {
                         .height(54.dp)
                 ) {
                     Text(
-                        stringResource(R.string.action_continue),
+                        if (ui.step == OnboardingStep.PROVIDER &&
+                            ui.aiAccessMode == AIAccessMode.FUD_AI_PLUS &&
+                            !plusBilling.isSubscribed
+                        ) "Subscribe to Continue" else stringResource(R.string.action_continue),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1164,15 +1196,16 @@ private fun ToggleCard(label: String, subtitle: String, enabled: Boolean, onTogg
 
 @Composable
 private fun ProviderStep(
-    provider: AIProvider,
-    apiKey: String,
-    onProviderChange: (AIProvider) -> Unit,
-    onKeyChange: (String) -> Unit
+    accessMode: AIAccessMode,
+    plusActive: Boolean,
+    plusPlans: List<FudAIPlusPlan>,
+    billingError: String?,
+    onAccessModeChange: (AIAccessMode) -> Unit,
+    onPurchasePlus: (FudAIPlusPlan) -> Unit
 ) {
-    // iOS aiProviderStep: sparkles icon in circle, "Bring Your Own AI" title,
-    // recommended-provider Gemini card with star icon, 3-step setup guide, footer.
+    // BYOK remains the free default. Plus is optional for users who don't want API setup.
     Column(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -1192,77 +1225,79 @@ private fun ProviderStep(
         }
         Spacer(Modifier.height(18.dp))
         Text(
-            stringResource(R.string.onboarding_provider_title),
+            "Choose Your AI",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            stringResource(R.string.onboarding_provider_subtitle),
+            "BYOK keeps Fud AI free. Plus is optional for no API setup and supports development.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
         Spacer(Modifier.height(18.dp))
-        // Recommended provider card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            border = BorderStroke(1.dp, AppColors.Calorie.copy(alpha = 0.25f)),
-            modifier = Modifier.fillMaxWidth()
+        SelectionCard(
+            icon = Icons.Outlined.AutoAwesome,
+            title = "Fud AI Plus",
+            subtitle = if (plusActive)
+                "Active. Gemini food scans, voice, and Coach with no setup."
+            else
+                "No setup for non-technical users. Gemini food scans, voice, and Coach with fallback.",
+            selected = accessMode == AIAccessMode.FUD_AI_PLUS
         ) {
-            Row(
-                Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.06f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Star,
-                        contentDescription = null,
-                        tint = AppColors.Calorie,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.onboarding_provider_recommended_title),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        stringResource(R.string.onboarding_provider_recommended_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f)
-                    )
-                }
-            }
+            onAccessModeChange(AIAccessMode.FUD_AI_PLUS)
         }
-        Spacer(Modifier.height(10.dp))
-        // Steps card
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                AiSetupRow("1", stringResource(R.string.onboarding_provider_step_1))
-                AiSetupRow("2", stringResource(R.string.onboarding_provider_step_2))
-                AiSetupRow("3", stringResource(R.string.onboarding_provider_step_3))
+        if (accessMode == AIAccessMode.FUD_AI_PLUS && !plusActive) {
+            Spacer(Modifier.height(10.dp))
+            if (plusPlans.isEmpty()) {
+                Text(
+                    billingError ?: "Plans load from Google Play. You can continue with BYOK for free.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            } else {
+                plusPlans.forEach { plan ->
+                    Button(
+                        onClick = { onPurchasePlus(plan) },
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Calorie),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("${plan.title} ${plan.price} ${plan.billingPeriod}", color = Color.White)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
+        SelectionCard(
+            icon = Icons.Outlined.Key,
+            title = "Bring Your Own Key",
+            subtitle = "Free app mode. Use your own Gemini key, OpenAI, Groq, or another provider.",
+            selected = accessMode == AIAccessMode.BRING_YOUR_OWN_KEY
+        ) {
+            onAccessModeChange(AIAccessMode.BRING_YOUR_OWN_KEY)
+        }
+        Spacer(Modifier.height(14.dp))
+        if (accessMode == AIAccessMode.BRING_YOUR_OWN_KEY) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AiSetupRow("1", stringResource(R.string.onboarding_provider_step_1))
+                    AiSetupRow("2", stringResource(R.string.onboarding_provider_step_2))
+                    AiSetupRow("3", stringResource(R.string.onboarding_provider_step_3))
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        }
         Text(
-            stringResource(R.string.onboarding_provider_footer),
+            "Calorie tracking should stay accessible: use BYOK freely if you can make an API key, or choose Plus for convenience.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center

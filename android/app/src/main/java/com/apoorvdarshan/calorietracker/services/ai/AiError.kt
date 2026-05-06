@@ -2,6 +2,7 @@ package com.apoorvdarshan.calorietracker.services.ai
 
 sealed class AiError(message: String) : Exception(message) {
     object NoApiKey : AiError("No API key configured. Add your key in Settings → AI Provider.")
+    object SubscriptionRequired : AiError("Fud AI Plus is not active. Subscribe or switch back to Bring Your Own Key in Settings.")
     object ImageConversionFailed : AiError("Failed to process the image.")
     class Network(cause: Throwable) : AiError("Network error: ${cause.localizedMessage}")
     object InvalidResponse : AiError("Could not understand the AI response. Please try again.")

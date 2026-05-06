@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apoorvdarshan.calorietracker.AppContainer
 import com.apoorvdarshan.calorietracker.R
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.SpeechLanguage
 import com.apoorvdarshan.calorietracker.models.SpeechProvider
 import com.apoorvdarshan.calorietracker.services.speech.AudioRecorder
@@ -86,7 +87,9 @@ fun VoiceInputSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    val provider by container.prefs.selectedSpeechProvider.collectAsState(initial = SpeechProvider.NATIVE)
+    val accessMode by container.prefs.aiAccessMode.collectAsState(initial = AIAccessMode.BRING_YOUR_OWN_KEY)
+    val configuredProvider by container.prefs.selectedSpeechProvider.collectAsState(initial = SpeechProvider.NATIVE)
+    val provider = if (accessMode == AIAccessMode.FUD_AI_PLUS) SpeechProvider.GEMINI else configuredProvider
     val speechLanguage by container.prefs.selectedSpeechLanguage(provider)
         .collectAsState(initial = SpeechLanguage.defaultFor(provider))
     val micDeniedMsg = stringResource(R.string.voice_mic_permission_denied)

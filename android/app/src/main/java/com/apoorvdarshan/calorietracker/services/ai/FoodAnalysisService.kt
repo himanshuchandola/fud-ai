@@ -3,6 +3,7 @@ package com.apoorvdarshan.calorietracker.services.ai
 import com.apoorvdarshan.calorietracker.data.KeyStore
 import com.apoorvdarshan.calorietracker.data.PreferencesStore
 import com.apoorvdarshan.calorietracker.models.AIProvider
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
 
@@ -83,6 +84,17 @@ class FoodAnalysisService(
     private suspend fun callAi(prompt: String, imageBytes: ByteArray?): String {
         val context = prefs.userContext.first()
         val finalPrompt = if (context.isNotBlank()) "User context (apply to every analysis): $context\n\n$prompt" else prompt
+
+        if (prefs.aiAccessMode.first() == AIAccessMode.FUD_AI_PLUS) {
+            if (!prefs.plusEntitlementActive.first()) throw AiError.SubscriptionRequired
+            val raw = FudAIPlusClient.generateContent(
+                client = okHttp,
+                prefs = prefs,
+                task = "food",
+                geminiBody = GeminiClient.requestBody(finalPrompt, imageBytes)
+            )
+            return GeminiClient.parseText(raw)
+        }
 
         val primary = prefs.selectedAIProvider.first()
         val primaryModel = prefs.selectedAIModel.first() ?: primary.defaultModel

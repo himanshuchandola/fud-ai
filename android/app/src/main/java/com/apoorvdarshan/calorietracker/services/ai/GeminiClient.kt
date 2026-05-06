@@ -27,24 +27,7 @@ object GeminiClient {
         imageBytes: ByteArray?
     ): String {
         val url = "$baseUrl/models/$model:generateContent"
-
-        val parts = JSONArray().apply {
-            imageBytes?.let {
-                put(
-                    JSONObject().put(
-                        "inlineData",
-                        JSONObject()
-                            .put("mimeType", "image/jpeg")
-                            .put("data", Base64.getEncoder().encodeToString(it))
-                    )
-                )
-            }
-            put(JSONObject().put("text", prompt))
-        }
-
-        val body = JSONObject().apply {
-            put("contents", JSONArray().put(JSONObject().put("parts", parts)))
-        }
+        val body = requestBody(prompt, imageBytes)
 
         val requestBody = body.toString().toRequestBody(jsonMedia)
         val bodyStr = RetryPolicy.execute {
@@ -59,6 +42,26 @@ object GeminiClient {
         }
 
         return parseText(bodyStr)
+    }
+
+    fun requestBody(prompt: String, imageBytes: ByteArray?): JSONObject {
+        val parts = JSONArray().apply {
+            imageBytes?.let {
+                put(
+                    JSONObject().put(
+                        "inlineData",
+                        JSONObject()
+                            .put("mimeType", "image/jpeg")
+                            .put("data", Base64.getEncoder().encodeToString(it))
+                    )
+                )
+            }
+            put(JSONObject().put("text", prompt))
+        }
+
+        return JSONObject().apply {
+            put("contents", JSONArray().put(JSONObject().put("parts", parts)))
+        }
     }
 
     /**
@@ -112,7 +115,7 @@ object GeminiClient {
         return parseText(bodyStr)
     }
 
-    private fun parseText(body: String): String {
+    fun parseText(body: String): String {
         val json = runCatching { JSONObject(body) }.getOrNull() ?: throw AiError.InvalidResponse
         val candidates = json.optJSONArray("candidates") ?: throw AiError.InvalidResponse
         val first = candidates.optJSONObject(0) ?: throw AiError.InvalidResponse

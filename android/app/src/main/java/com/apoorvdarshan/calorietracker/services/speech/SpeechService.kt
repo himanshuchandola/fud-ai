@@ -2,7 +2,10 @@ package com.apoorvdarshan.calorietracker.services.speech
 
 import com.apoorvdarshan.calorietracker.data.KeyStore
 import com.apoorvdarshan.calorietracker.data.PreferencesStore
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.SpeechProvider
+import com.apoorvdarshan.calorietracker.services.ai.FudAIPlusClient
+import com.apoorvdarshan.calorietracker.services.ai.AiError
 import com.apoorvdarshan.calorietracker.services.ai.FoodAnalysisService
 import kotlinx.coroutines.flow.first
 import okhttp3.OkHttpClient
@@ -21,6 +24,26 @@ class SpeechService(
 
     /** Returns the transcript text. Throws [SttApiError] on any failure. */
     suspend fun transcribeRemote(audio: File): String {
+        if (prefs.aiAccessMode.first() == AIAccessMode.FUD_AI_PLUS) {
+            if (!prefs.plusEntitlementActive.first()) {
+                throw SttApiError.Api("Fud AI Plus is not active. Subscribe or switch back to Bring Your Own Key in Settings.")
+            }
+            val languageCode = prefs.selectedSpeechLanguage(SpeechProvider.GEMINI).first().remoteLanguageCode()
+            return try {
+                val raw = FudAIPlusClient.generateContent(
+                    client = okHttp,
+                    prefs = prefs,
+                    task = "speech",
+                    geminiBody = GeminiAudioClient.requestBody(audio, languageCode)
+                )
+                GeminiAudioClient.parseTranscript(raw)
+            } catch (e: SttApiError) {
+                throw e
+            } catch (e: AiError) {
+                throw SttApiError.Api(e.message ?: "Fud AI Plus transcription failed.")
+            }
+        }
+
         val provider = prefs.selectedSpeechProvider.first()
         val languageCode = prefs.selectedSpeechLanguage(provider).first().remoteLanguageCode()
         val apiKey = keyStore.speechApiKey(provider)

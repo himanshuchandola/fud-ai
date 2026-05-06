@@ -3,6 +3,7 @@ package com.apoorvdarshan.calorietracker.services.ai
 import com.apoorvdarshan.calorietracker.data.KeyStore
 import com.apoorvdarshan.calorietracker.data.PreferencesStore
 import com.apoorvdarshan.calorietracker.models.AIProvider
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.ActivityLevel
 import com.apoorvdarshan.calorietracker.models.BodyFatEntry
 import com.apoorvdarshan.calorietracker.models.ChatMessage
@@ -56,6 +57,11 @@ class ChatService(
             "$baseSystemPrompt\n\n## User-provided context\n$userContext"
         else baseSystemPrompt
         val tools = CoachTools(weights = weights, bodyFats = bodyFats, foods = foods)
+
+        if (prefs.aiAccessMode.first() == AIAccessMode.FUD_AI_PLUS) {
+            if (!prefs.plusEntitlementActive.first()) throw AiError.SubscriptionRequired
+            return runFudAIPlusGeminiToolLoop(systemPrompt, history, newUserMessage, tools)
+        }
 
         val provider = prefs.selectedAIProvider.first()
         val model = prefs.selectedAIModel.first() ?: provider.defaultModel
@@ -344,6 +350,36 @@ class ChatService(
         tools: CoachTools
     ): String {
         val url = "$baseUrl/models/$model:generateContent"
+        return runGeminiToolLoopWithSender(systemPrompt, history, newUserMessage, tools) { body ->
+            RetryPolicy.execute {
+                okHttp.newCall(
+                    Request.Builder()
+                        .url(url)
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("X-goog-api-key", apiKey)
+                        .post(body.toString().toRequestBody(JSON_MEDIA))
+                        .build()
+                )
+            }
+        }
+    }
+
+    private suspend fun runFudAIPlusGeminiToolLoop(
+        systemPrompt: String,
+        history: List<ChatMessage>,
+        newUserMessage: String,
+        tools: CoachTools
+    ): String = runGeminiToolLoopWithSender(systemPrompt, history, newUserMessage, tools) { body ->
+        FudAIPlusClient.generateContent(okHttp, prefs, "coach", body)
+    }
+
+    private suspend fun runGeminiToolLoopWithSender(
+        systemPrompt: String,
+        history: List<ChatMessage>,
+        newUserMessage: String,
+        tools: CoachTools,
+        send: suspend (JSONObject) -> String
+    ): String {
         // Gemini tool schema: tools=[{functionDeclarations:[{name,description,parameters}]}]
         val declarations = JSONArray()
         for (name in CoachTools.TOOL_NAMES) {
@@ -376,16 +412,7 @@ class ChatService(
                 put("contents", contents)
                 put("tools", JSONArray().put(toolsObj))
             }
-            val raw = RetryPolicy.execute {
-                okHttp.newCall(
-                    Request.Builder()
-                        .url(url)
-                        .addHeader("Content-Type", "application/json")
-                        .addHeader("X-goog-api-key", apiKey)
-                        .post(body.toString().toRequestBody(JSON_MEDIA))
-                        .build()
-                )
-            }
+            val raw = send(body)
             val json = runCatching { JSONObject(raw) }.getOrNull() ?: throw AiError.InvalidResponse
             val candidate = json.optJSONArray("candidates")?.optJSONObject(0) ?: throw AiError.InvalidResponse
             val content = candidate.optJSONObject("content") ?: throw AiError.InvalidResponse

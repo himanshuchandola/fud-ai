@@ -19,6 +19,7 @@ kotlinxCoroutines = "1.9.0"
 cameraX = "1.4.0"
 vico = "2.0.2"
 splashscreen = "1.0.1"
+billing = "8.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -53,6 +54,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", version.ref = "vico" }
 androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }
+billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

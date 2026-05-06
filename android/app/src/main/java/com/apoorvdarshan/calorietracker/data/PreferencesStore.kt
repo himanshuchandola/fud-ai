@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.apoorvdarshan.calorietracker.models.AIProvider
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.BodyFatEntry
 import com.apoorvdarshan.calorietracker.models.ChatMessage
 import com.apoorvdarshan.calorietracker.models.FoodEntry
@@ -18,11 +19,13 @@ import com.apoorvdarshan.calorietracker.models.WeightEntry
 import com.apoorvdarshan.calorietracker.models.WidgetSnapshot
 import com.apoorvdarshan.calorietracker.ui.theme.AppThemeColor
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import java.util.UUID
 
 val Context.fudaiDataStore by preferencesDataStore(name = "fudai_prefs")
 
@@ -102,6 +105,27 @@ class PreferencesStore(private val context: Context) {
     suspend fun setLastSavedMealsSegment(v: String) { ds.edit { it[Keys.LAST_SAVED_MEALS_SEGMENT] = v } }
 
     // -- AI Provider selection --------------------------------------------
+    val aiAccessMode: Flow<AIAccessMode> = ds.data.map {
+        val raw = it[Keys.AI_ACCESS_MODE]
+        AIAccessMode.values().firstOrNull { mode -> mode.name == raw } ?: AIAccessMode.BRING_YOUR_OWN_KEY
+    }
+    suspend fun setAiAccessMode(mode: AIAccessMode) {
+        ds.edit { it[Keys.AI_ACCESS_MODE] = mode.name }
+    }
+
+    val plusEntitlementActive: Flow<Boolean> = ds.data.map { it[Keys.PLUS_ENTITLEMENT_ACTIVE] ?: false }
+    suspend fun setPlusEntitlementActive(active: Boolean) {
+        ds.edit { it[Keys.PLUS_ENTITLEMENT_ACTIVE] = active }
+    }
+
+    suspend fun installId(): String {
+        val existing = ds.data.map { it[Keys.INSTALL_ID] }.first()
+        if (!existing.isNullOrBlank()) return existing
+        val generated = UUID.randomUUID().toString()
+        ds.edit { it[Keys.INSTALL_ID] = generated }
+        return generated
+    }
+
     val selectedAIProvider: Flow<AIProvider> = ds.data.map {
         val raw = it[Keys.SELECTED_AI_PROVIDER]
         AIProvider.values().firstOrNull { p -> p.name == raw } ?: AIProvider.GEMINI
@@ -288,6 +312,9 @@ class PreferencesStore(private val context: Context) {
         val APP_THEME_COLOR = stringPreferencesKey("appThemeColor")
         val WEEK_STARTS_MONDAY = booleanPreferencesKey("weekStartsOnMonday")
         val LAST_SAVED_MEALS_SEGMENT = stringPreferencesKey("lastRecentsSegment")
+        val AI_ACCESS_MODE = stringPreferencesKey("aiAccessMode")
+        val PLUS_ENTITLEMENT_ACTIVE = booleanPreferencesKey("fudAIPlusEntitlementActive")
+        val INSTALL_ID = stringPreferencesKey("fudAIInstallId")
         val SELECTED_AI_PROVIDER = stringPreferencesKey("selectedAIProvider")
         val SELECTED_AI_MODEL = stringPreferencesKey("selectedAIModel")
         val USER_CONTEXT = stringPreferencesKey("userContext")

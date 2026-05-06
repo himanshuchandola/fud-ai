@@ -64,6 +64,22 @@ object GeminiAudioClient {
         audio: File,
         languageCode: String? = null
     ): String = withContext(Dispatchers.IO) {
+        val body = requestBody(audio, languageCode)
+            .toString()
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+        val req = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("X-goog-api-key", apiKey)
+            .post(body)
+            .build()
+
+        val responseBody = runRequestRaw(client, req)
+        parseTranscript(responseBody)
+    }
+
+    fun requestBody(audio: File, languageCode: String? = null): JSONObject {
         val languageInstruction = if (!languageCode.isNullOrBlank()) {
             " Prefer language code $languageCode when interpreting speech, but preserve the spoken language if it is clearly different."
         } else {
@@ -85,20 +101,12 @@ object GeminiAudioClient {
             )
             .put(JSONObject().put("text", prompt))
 
-        val body = JSONObject()
+        return JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("parts", parts)))
-            .toString()
-            .toRequestBody("application/json; charset=utf-8".toMediaType())
+    }
 
-        val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-            .addHeader("Content-Type", "application/json")
-            .addHeader("X-goog-api-key", apiKey)
-            .post(body)
-            .build()
-
-        val responseBody = runRequestRaw(client, req)
-        runCatching {
+    fun parseTranscript(responseBody: String): String {
+        return runCatching {
             val partsJson = JSONObject(responseBody)
                 .getJSONArray("candidates")
                 .getJSONObject(0)

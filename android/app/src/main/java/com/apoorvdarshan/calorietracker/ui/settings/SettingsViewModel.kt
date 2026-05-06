@@ -1,9 +1,11 @@
 package com.apoorvdarshan.calorietracker.ui.settings
 
+import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.apoorvdarshan.calorietracker.AppContainer
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.AIProvider
 import com.apoorvdarshan.calorietracker.models.SpeechLanguage
 import com.apoorvdarshan.calorietracker.models.SpeechProvider
@@ -11,6 +13,10 @@ import com.apoorvdarshan.calorietracker.models.UserProfile
 import com.apoorvdarshan.calorietracker.models.WeightEntry
 import com.apoorvdarshan.calorietracker.models.WeightGoal
 import com.apoorvdarshan.calorietracker.services.AndroidAppIconManager
+import com.apoorvdarshan.calorietracker.services.ai.FoodAnalysisService
+import com.apoorvdarshan.calorietracker.services.ai.FudAIPlusClient
+import com.apoorvdarshan.calorietracker.services.ai.PlusUsageSnapshot
+import com.apoorvdarshan.calorietracker.services.billing.FudAIPlusPlan
 import com.apoorvdarshan.calorietracker.ui.theme.AppThemeColor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +27,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class SettingsUiState(
+    val aiAccessMode: AIAccessMode = AIAccessMode.BRING_YOUR_OWN_KEY,
+    val plusActive: Boolean = false,
+    val plusPlans: List<FudAIPlusPlan> = emptyList(),
+    val plusBillingError: String? = null,
+    val plusUsage: PlusUsageSnapshot? = null,
+    val plusUsageError: String? = null,
     val selectedAI: AIProvider = AIProvider.GEMINI,
     val selectedModel: String = AIProvider.GEMINI.defaultModel,
     val selectedSpeech: SpeechProvider = SpeechProvider.NATIVE,
@@ -47,6 +59,8 @@ class SettingsViewModel(val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
+            val accessMode = container.prefs.aiAccessMode.first()
+            val plusActive = container.prefs.plusEntitlementActive.first()
             val provider = container.prefs.selectedAIProvider.first()
             val model = container.prefs.selectedAIModel.first() ?: provider.defaultModel
             val speech = container.prefs.selectedSpeechProvider.first()
@@ -66,6 +80,8 @@ class SettingsViewModel(val container: AppContainer) : ViewModel() {
             val fbModel = container.prefs.selectedFallbackModel.first() ?: fbProvider.defaultModel
             val fbMasked = maskKey(container.keyStore.apiKey(fbProvider))
             _ui.value = SettingsUiState(
+                aiAccessMode = accessMode,
+                plusActive = plusActive,
                 selectedAI = provider,
                 selectedModel = model,
                 selectedSpeech = speech,
@@ -85,6 +101,55 @@ class SettingsViewModel(val container: AppContainer) : ViewModel() {
                 fallbackModel = fbModel,
                 fallbackApiKeyMasked = fbMasked
             )
+        }
+        viewModelScope.launch {
+            container.plusBilling.state.collect { billing ->
+                _ui.value = _ui.value.copy(
+                    plusActive = billing.isSubscribed || container.prefs.plusEntitlementActive.first(),
+                    plusPlans = billing.plans,
+                    plusBillingError = billing.error
+                )
+            }
+        }
+        viewModelScope.launch {
+            container.prefs.aiAccessMode.collect { mode ->
+                _ui.value = _ui.value.copy(aiAccessMode = mode)
+            }
+        }
+        viewModelScope.launch {
+            container.prefs.plusEntitlementActive.collect { active ->
+                _ui.value = _ui.value.copy(plusActive = active || container.plusBilling.state.value.isSubscribed)
+            }
+        }
+    }
+
+    fun setAiAccessMode(mode: AIAccessMode) {
+        viewModelScope.launch {
+            container.prefs.setAiAccessMode(mode)
+            _ui.value = _ui.value.copy(aiAccessMode = mode)
+            if (mode == AIAccessMode.FUD_AI_PLUS) refreshPlusUsage()
+        }
+    }
+
+    fun purchasePlus(activity: Activity, productId: String) {
+        setAiAccessMode(AIAccessMode.FUD_AI_PLUS)
+        container.plusBilling.purchase(activity, productId)
+    }
+
+    fun restorePlus() {
+        container.plusBilling.restorePurchases()
+    }
+
+    fun refreshPlusUsage() {
+        viewModelScope.launch {
+            if (!_ui.value.plusActive) return@launch
+            _ui.value = _ui.value.copy(plusUsageError = null)
+            try {
+                val usage = FudAIPlusClient.usage(FoodAnalysisService.defaultClient, container.prefs)
+                _ui.value = _ui.value.copy(plusUsage = usage, plusUsageError = null)
+            } catch (_: Exception) {
+                _ui.value = _ui.value.copy(plusUsageError = "Could not refresh Plus usage right now.")
+            }
         }
     }
 

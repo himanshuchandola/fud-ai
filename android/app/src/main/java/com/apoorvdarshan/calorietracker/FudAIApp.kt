@@ -14,6 +14,7 @@ import com.apoorvdarshan.calorietracker.services.TestDataSeeder
 import com.apoorvdarshan.calorietracker.services.WidgetSnapshotWriter
 import com.apoorvdarshan.calorietracker.services.ai.ChatService
 import com.apoorvdarshan.calorietracker.services.ai.FoodAnalysisService
+import com.apoorvdarshan.calorietracker.services.billing.FudAIPlusBillingManager
 import com.apoorvdarshan.calorietracker.services.health.HealthConnectManager
 import com.apoorvdarshan.calorietracker.services.speech.SpeechService
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +40,7 @@ class FudAIApp : Application() {
         super.onCreate()
         container = AppContainer(this)
         container.notifications.createChannels()
+        container.plusBilling.connect()
         container.widgetSnapshotWriter.observe().launchIn(appScope)
         // Re-arm the daily weight-log alarm on every cold start. AlarmManager
         // drops scheduled alarms on device reboot and (sometimes) on app
@@ -80,6 +82,7 @@ class AppContainer(app: FudAIApp) {
     val foodAnalysis = FoodAnalysisService(prefs, keyStore)
     val chatService = ChatService(prefs, keyStore)
     val speechService = SpeechService(prefs, keyStore)
+    val plusBilling = FudAIPlusBillingManager(app, prefs)
 
     val widgetSnapshotWriter = WidgetSnapshotWriter(app, prefs, foodRepository, profileRepository)
     val testDataSeeder = TestDataSeeder(this)

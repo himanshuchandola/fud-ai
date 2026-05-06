@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.apoorvdarshan.calorietracker.AppContainer
 import com.apoorvdarshan.calorietracker.models.ActivityLevel
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.models.AIProvider
 import com.apoorvdarshan.calorietracker.models.Gender
 import com.apoorvdarshan.calorietracker.models.UserProfile
@@ -44,6 +45,7 @@ data class OnboardingState(
     val useMetric: Boolean = false,
     val notificationsEnabled: Boolean = false,
     val healthConnectEnabled: Boolean = false,
+    val aiAccessMode: AIAccessMode = AIAccessMode.BRING_YOUR_OWN_KEY,
     val aiProvider: AIProvider = AIProvider.GEMINI,
     val apiKey: String = "",
     val submitting: Boolean = false,
@@ -115,6 +117,10 @@ class OnboardingViewModel(private val container: AppContainer) : ViewModel() {
     fun setHealthConnectEnabled(v: Boolean) {
         _ui.value = _ui.value.copy(healthConnectEnabled = v)
     }
+    fun setAiAccessMode(mode: AIAccessMode) {
+        _ui.value = _ui.value.copy(aiAccessMode = mode)
+        viewModelScope.launch { container.prefs.setAiAccessMode(mode) }
+    }
     fun setAiProvider(p: AIProvider) {
         _ui.value = _ui.value.copy(aiProvider = p)
     }
@@ -157,10 +163,13 @@ class OnboardingViewModel(private val container: AppContainer) : ViewModel() {
             }
             container.prefs.setNotificationsEnabled(state.notificationsEnabled)
             container.prefs.setHealthConnectEnabled(state.healthConnectEnabled)
-            container.prefs.setSelectedAIProvider(state.aiProvider)
-            container.prefs.setSelectedAIModel(state.aiProvider.defaultModel)
-            if (state.apiKey.isNotBlank()) {
-                container.keyStore.setApiKey(state.aiProvider, state.apiKey.trim())
+            container.prefs.setAiAccessMode(state.aiAccessMode)
+            if (state.aiAccessMode == AIAccessMode.BRING_YOUR_OWN_KEY) {
+                container.prefs.setSelectedAIProvider(state.aiProvider)
+                container.prefs.setSelectedAIModel(state.aiProvider.defaultModel)
+                if (state.apiKey.isNotBlank()) {
+                    container.keyStore.setApiKey(state.aiProvider, state.apiKey.trim())
+                }
             }
             container.prefs.setOnboardingCompleted(true)
             onDone()
