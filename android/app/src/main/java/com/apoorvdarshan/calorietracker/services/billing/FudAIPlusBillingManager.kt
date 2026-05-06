@@ -88,6 +88,11 @@ class FudAIPlusBillingManager(
     }
 
     fun purchase(activity: Activity, productId: String) {
+        if (!billingClient.isReady) {
+            connect()
+            _state.value = _state.value.copy(error = "Google Play Billing is still connecting. Try again in a moment.")
+            return
+        }
         val productDetails = productDetailsById[productId]
         if (productDetails == null) {
             _state.value = _state.value.copy(error = "This Plus plan is not available from Google Play yet.")
@@ -105,7 +110,12 @@ class FudAIPlusBillingManager(
         val flowParams = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productParams))
             .build()
-        billingClient.launchBillingFlow(activity, flowParams)
+        val result = billingClient.launchBillingFlow(activity, flowParams)
+        if (result.responseCode != BillingClient.BillingResponseCode.OK) {
+            _state.value = _state.value.copy(
+                error = result.debugMessage.takeIf { it.isNotBlank() } ?: "Could not start Google Play checkout."
+            )
+        }
     }
 
     fun restorePurchases() {
@@ -128,7 +138,7 @@ class FudAIPlusBillingManager(
     override fun onPurchasesUpdated(result: BillingResult, purchases: MutableList<Purchase>?) {
         when (result.responseCode) {
             BillingClient.BillingResponseCode.OK -> handlePurchases(purchases.orEmpty())
-            BillingClient.BillingResponseCode.USER_CANCELED -> Unit
+            BillingClient.BillingResponseCode.USER_CANCELED -> _state.value = _state.value.copy(error = null)
             else -> _state.value = _state.value.copy(error = result.debugMessage.takeIf { it.isNotBlank() })
         }
     }

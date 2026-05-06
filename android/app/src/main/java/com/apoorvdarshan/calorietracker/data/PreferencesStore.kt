@@ -118,6 +118,11 @@ class PreferencesStore(private val context: Context) {
         ds.edit { it[Keys.PLUS_ENTITLEMENT_ACTIVE] = active }
     }
 
+    val hasSeenPlusIntro: Flow<Boolean> = ds.data.map { it[Keys.PLUS_INTRO_SEEN] ?: false }
+    suspend fun setHasSeenPlusIntro(seen: Boolean) {
+        ds.edit { it[Keys.PLUS_INTRO_SEEN] = seen }
+    }
+
     suspend fun installId(): String {
         val existing = ds.data.map { it[Keys.INSTALL_ID] }.first()
         if (!existing.isNullOrBlank()) return existing
@@ -314,6 +319,7 @@ class PreferencesStore(private val context: Context) {
         val LAST_SAVED_MEALS_SEGMENT = stringPreferencesKey("lastRecentsSegment")
         val AI_ACCESS_MODE = stringPreferencesKey("aiAccessMode")
         val PLUS_ENTITLEMENT_ACTIVE = booleanPreferencesKey("fudAIPlusEntitlementActive")
+        val PLUS_INTRO_SEEN = booleanPreferencesKey("fudAIPlusIntroSeen_1_0_11")
         val INSTALL_ID = stringPreferencesKey("fudAIInstallId")
         val SELECTED_AI_PROVIDER = stringPreferencesKey("selectedAIProvider")
         val SELECTED_AI_MODEL = stringPreferencesKey("selectedAIModel")

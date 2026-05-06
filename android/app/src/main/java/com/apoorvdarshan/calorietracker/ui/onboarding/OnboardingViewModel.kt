@@ -119,7 +119,6 @@ class OnboardingViewModel(private val container: AppContainer) : ViewModel() {
     }
     fun setAiAccessMode(mode: AIAccessMode) {
         _ui.value = _ui.value.copy(aiAccessMode = mode)
-        viewModelScope.launch { container.prefs.setAiAccessMode(mode) }
     }
     fun setAiProvider(p: AIProvider) {
         _ui.value = _ui.value.copy(aiProvider = p)

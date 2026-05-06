@@ -3,13 +3,17 @@ package com.apoorvdarshan.calorietracker.ui.navigation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.apoorvdarshan.calorietracker.AppContainer
+import com.apoorvdarshan.calorietracker.models.AIAccessMode
 import com.apoorvdarshan.calorietracker.services.update.AndroidUpdateChecker
 import com.apoorvdarshan.calorietracker.services.update.AndroidUpdateState
 import com.apoorvdarshan.calorietracker.ui.about.AboutScreen
@@ -27,6 +32,8 @@ import com.apoorvdarshan.calorietracker.ui.home.HomeScreen
 import com.apoorvdarshan.calorietracker.ui.onboarding.OnboardingScreen
 import com.apoorvdarshan.calorietracker.ui.progress.ProgressScreen
 import com.apoorvdarshan.calorietracker.ui.settings.SettingsScreen
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @Composable
 fun FudAINavHost(
@@ -44,9 +51,25 @@ fun FudAINavHost(
     val context = LocalContext.current
     val currentVersion = remember(context) { AndroidUpdateChecker.currentVersion(context) }
     var updateAvailable by remember { mutableStateOf(false) }
+    var showPlusIntro by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(currentVersion) {
         updateAvailable = AndroidUpdateChecker.check(currentVersion) is AndroidUpdateState.Available
+    }
+
+    LaunchedEffect(startOnboarding) {
+        if (startOnboarding) {
+            container.prefs.setHasSeenPlusIntro(true)
+            return@LaunchedEffect
+        }
+
+        if (!container.prefs.hasSeenPlusIntro.first() &&
+            container.prefs.aiAccessMode.first() == AIAccessMode.BRING_YOUR_OWN_KEY
+        ) {
+            container.prefs.setHasSeenPlusIntro(true)
+            showPlusIntro = true
+        }
     }
 
     Scaffold(
@@ -96,6 +119,38 @@ fun FudAINavHost(
                 composable(FudAIRoutes.ABOUT) { AboutScreen(container = container) }
             }
         }
+    }
+
+    if (showPlusIntro) {
+        AlertDialog(
+            onDismissRequest = { showPlusIntro = false },
+            title = { Text("Fud AI Plus") },
+            text = {
+                Text(
+                    "No API key needed for food scans, voice logging, and Coach. BYOK stays free and you can switch anytime."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPlusIntro = false
+                        scope.launch { container.prefs.setAiAccessMode(AIAccessMode.FUD_AI_PLUS) }
+                        nav.navigate(FudAIRoutes.SETTINGS) {
+                            popUpTo(FudAIRoutes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                ) {
+                    Text("See Plans")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPlusIntro = false }) {
+                    Text("Keep BYOK")
+                }
+            }
+        )
     }
 }
 
