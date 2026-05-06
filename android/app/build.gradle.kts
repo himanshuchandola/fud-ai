@@ -64,11 +64,15 @@ android {
         }
         debug {
             // Suffix the package + version so the debug build installs side-by-side
-            // with the production app pulled from Play Store. Launcher label stays
-            // "Fud AI" (same as release) — distinguish the two by the install order
-            // / icon position rather than a separate label.
+            // with the production app pulled from Play Store.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+        }
+        create("playtest") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".playtest"
+            versionNameSuffix = "-playtest"
+            matchingFallbacks += listOf("release")
         }
     }
     compileOptions {
